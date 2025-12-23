@@ -98,6 +98,16 @@
             background-image: linear-gradient(45deg, rgba(255,255,255,0.5) 25%, transparent 25%, transparent 50%, rgba(255,255,255,0.5) 50%, rgba(255,255,255,0.5) 75%, transparent 75%, transparent);
             background-size: 10px 10px;
         }
+        .palette-btn.pending-merge {
+            border-color: #f59e0b; /* Amber */
+            background-color: #fef3c7 !important;
+            animation: pulse 1.5s infinite;
+        }
+        @keyframes pulse {
+            0% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.7); }
+            70% { box-shadow: 0 0 0 6px rgba(245, 158, 11, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0); }
+        }
         
         .modal-overlay {
             background-color: rgba(0,0,0,0.6);
@@ -327,6 +337,7 @@
                 partyTotals: {0:0, 1:0, 2:0},
                 minorityParty: -1,
                 isEditingSizes: false,
+                pendingMerge: null, // New State for Merging
                 districtWeights: {}, 
                 districtTargets: {} 
             };
@@ -342,6 +353,7 @@
                     const btns = els.palette.children;
                     for (let i=0; i<btns.length; i++) {
                         const btn = btns[i];
+                        // Don't remove pending-merge class here
                         if (parseInt(btn.dataset.id) === id) {
                             btn.classList.add('active');
                             btn.style.borderColor = '#334155';
@@ -423,27 +435,63 @@
                 return visited.size === indices.size;
             }
 
-            function getDistrictWinner(cells) {
+            function getDistrictWinners(cells, weight) {
+                if (cells.length === 0) return [];
                 let counts = {0:0, 1:0, 2:0};
                 cells.forEach(c => {
                     c.voters.forEach(v => { counts[v]++; });
                 });
                 
-                const max = Math.max(counts[0], counts[1], counts[2]);
-                if (max === 0) return -1; 
-
-                let winners = [];
-                if (counts[0] === max) winners.push(0);
-                if (counts[1] === max) winners.push(1);
-                if (counts[2] === max) winners.push(2);
+                // Convert to array for sorting: [{id: 0, count: 5}, ...]
+                let parties = [
+                    {id: 0, count: counts[0]},
+                    {id: 1, count: counts[1]},
+                    {id: 2, count: counts[2]}
+                ];
                 
-                if (winners.length === 1) {
-                    return winners[0];
+                // Sort by count DESC
+                parties.sort((a,b) => b.count - a.count);
+                
+                if (weight === 1) {
+                    // Logic for 1x: Top winner, or minority if tied
+                    let top = parties[0];
+                    let winners = parties.filter(p => p.count === top.count).map(p => p.id);
+                    if (winners.length === 1) return [winners[0]];
+                    // Tie logic
+                    if (winners.includes(state.minorityParty)) return [state.minorityParty];
+                    return [-1]; // tie
                 } else {
-                    if (winners.includes(state.minorityParty)) {
-                        return state.minorityParty;
+                    // Logic for 2x: Two seats
+                    // If no votes, return empty
+                    if(parties[0].count === 0) return [-1, -1];
+
+                    // Candidate 1: Clear winner
+                    let seat1 = parties[0].id;
+                    
+                    // Candidate 2: Second place
+                    let seat2 = parties[1].id;
+                    
+                    // Specific logic constraint: "It shouldn't be two seats from the same party."
+                    // Since parties are distinct (0, 1, 2), seat1 and seat2 will naturally be different parties 
+                    // UNLESS there is a tie for 1st place between two parties.
+                    
+                    // Case: Tie for 1st (e.g., A:10, B:10, C:2) -> A and B get seats.
+                    // Case: Clear winner (e.g. A:20, B:5, C:2) -> A and B get seats.
+                    // Case: A:20, B:0, C:0 -> A gets seat 1. Seat 2?
+                    // "It shouldn't be two seats from the same party" implies we enforce diversity.
+                    // If parties[1].count is 0, do they still get a seat?
+                    // Let's assume yes, to fulfill the "two seats from different parties" rule.
+                    
+                    // Handle Tie for 2nd place (e.g. A:20, B:5, C:5) -> Who gets seat 2?
+                    // Minority rule check for seat 2
+                    if (parties[1].count === parties[2].count) {
+                        let potential2nds = [parties[1].id, parties[2].id];
+                        if (potential2nds.includes(state.minorityParty)) {
+                            seat2 = state.minorityParty;
+                        }
                     }
-                    return -1; 
+                    
+                    return [seat1, seat2];
                 }
             }
 
@@ -455,7 +503,8 @@
                 if (state.viewMode === 'results') {
                     for(let i=1; i<=config.numDistricts; i++) {
                         const cells = state.grid.filter(c => c.districtId === i);
-                        districtWinners[i] = getDistrictWinner(cells);
+                        const weight = state.districtWeights[i];
+                        districtWinners[i] = getDistrictWinners(cells, weight);
                     }
                 }
 
@@ -465,18 +514,37 @@
 
                     if (dId === 0) {
                         el.style.backgroundColor = '#ffffff';
+                        el.style.background = 'none';
+                        el.style.backgroundColor = '#ffffff';
                     } else {
                         if (state.viewMode === 'results') {
-                            const w = districtWinners[dId];
-                            if (w === 0) el.style.backgroundColor = '#e0e7ff'; 
-                            else if (w === 1) el.style.backgroundColor = '#ffedd5'; 
-                            else if (w === 2) el.style.backgroundColor = '#d1fae5'; 
-                            else el.style.backgroundColor = '#f1f5f9'; 
+                            const winners = districtWinners[dId];
+                            const weight = state.districtWeights[dId];
+                            
+                            // Map party ID to color
+                            const getColor = (id) => {
+                                if(id===0) return '#e0e7ff';
+                                if(id===1) return '#ffedd5';
+                                if(id===2) return '#d1fae5';
+                                return '#f1f5f9';
+                            };
+
+                            if (weight === 1) {
+                                el.style.background = 'none';
+                                el.style.backgroundColor = getColor(winners[0]);
+                            } else {
+                                // 2x District - Gradient
+                                const c1 = getColor(winners[0]);
+                                const c2 = getColor(winners[1]);
+                                el.style.background = `linear-gradient(135deg, ${c1} 50%, ${c2} 50%)`;
+                            }
                         } else {
+                            el.style.background = 'none';
                             el.style.backgroundColor = state.colors[dId - 1];
                         }
                     }
                     
+                    // Borders
                     if (dId === 0) {
                         el.removeAttribute('data-border-top');
                         el.removeAttribute('data-border-bottom');
@@ -534,11 +602,14 @@
                     if (distPop !== target) invalidSize = true;
                     if (cells.length > 0 && !checkContiguity(cells)) broken = true;
 
-                    const winner = getDistrictWinner(cells);
                     const weight = state.districtWeights[i];
-                    if(winner === 0) wins0 += weight;
-                    if(winner === 1) wins1 += weight;
-                    if(winner === 2) wins2 += weight;
+                    const winners = getDistrictWinners(cells, weight);
+                    
+                    winners.forEach(w => {
+                        if(w === 0) wins0++;
+                        if(w === 1) wins1++;
+                        if(w === 2) wins2++;
+                    });
                 }
 
                 els.score0.innerText = wins0;
@@ -566,17 +637,23 @@
                 let html = '';
                 for(let i=1; i<=config.numDistricts; i++) {
                     const cells = state.grid.filter(c => c.districtId === i);
-                    const winner = getDistrictWinner(cells);
                     const weight = state.districtWeights[i];
+                    const winners = getDistrictWinners(cells, weight);
                     
-                    let bg = "bg-slate-200";
-                    if(winner===0) bg="bg-indigo-500";
-                    if(winner===1) bg="bg-orange-500";
-                    if(winner===2) bg="bg-emerald-500";
+                    // Render squares for winners
+                    // For 1x: 1 square
+                    // For 2x: 2 squares (winner 1 and winner 2)
                     
-                    html += `<div class="${bg} h-6 rounded flex items-center justify-center text-white text-[10px] font-bold relative">${i} ${weight>1 ? '<span class="absolute -top-1 -right-1 bg-slate-800 text-[6px] px-1 rounded-full">2x</span>':''}</div>`;
+                    const getBg = (w) => {
+                        if(w===0) return "bg-indigo-500";
+                        if(w===1) return "bg-orange-500";
+                        if(w===2) return "bg-emerald-500";
+                        return "bg-slate-200";
+                    };
+
+                    html += `<div class="${getBg(winners[0])} h-6 rounded flex items-center justify-center text-white text-[10px] font-bold relative">${i} ${weight>1 ? '<span class="absolute -top-1 -right-1 bg-slate-800 text-[6px] px-1 rounded-full">2x</span>':''}</div>`;
                     if(weight > 1) {
-                         html += `<div class="${bg} h-6 rounded flex items-center justify-center text-white text-[10px] font-bold opacity-70">${i}</div>`;
+                         html += `<div class="${getBg(winners[1])} h-6 rounded flex items-center justify-center text-white text-[10px] font-bold opacity-80">${i}</div>`;
                     }
                 }
                 return html;
@@ -674,8 +751,8 @@
                 setTimeout(() => {
                     showModal('Sandbox Mode', `
                         <p class="mb-2"><strong>Goal:</strong> Experiment with district boundaries.</p>
-                        <p class="mb-2"><strong>New:</strong> Use <span class="font-bold bg-slate-200 text-slate-700 px-1 rounded text-xs">Edit Sizes</span> to create <span class="font-bold text-indigo-600">Multi-Member Districts (2x)</span>. These require double population and count as 2 seats.</p>
-                        <p class="text-xs text-slate-500 mt-2">Useful for high-density areas.</p>
+                        <p class="mb-2"><strong>New:</strong> Use <span class="font-bold bg-slate-200 text-slate-700 px-1 rounded text-xs">Edit Sizes</span> to create <span class="font-bold text-indigo-600">Multi-Member Districts (2x)</span>.</p>
+                        <p class="text-xs text-slate-500 mt-2 bg-slate-50 p-2 rounded"><strong>How to create 2x:</strong><br>1. Enable "Edit Sizes"<br>2. Click District A (Keeps seat)<br>3. Click District B (Deletes seat)</p>
                     `, '🗺️');
                 }, 300);
             }
@@ -746,6 +823,7 @@
                 state.districtWeights = {};
                 for(let i=1; i<=config.numDistricts; i++) state.districtWeights[i] = 1;
                 state.isEditingSizes = false;
+                state.pendingMerge = null; // Reset
                 updateToggleBtnUI();
 
                 state.colors = [];
@@ -848,6 +926,7 @@
 
             function toggleSizeEdit() {
                 state.isEditingSizes = !state.isEditingSizes;
+                state.pendingMerge = null; // Clear pending state
                 updateToggleBtnUI();
                 setupPaletteUI();
             }
@@ -869,7 +948,12 @@
                 for (let i = 1; i <= config.numDistricts; i++) {
                     const btn = document.createElement('button');
                     let baseClass = 'palette-btn w-12 h-12 sm:w-14 sm:h-14 rounded-full flex flex-col items-center justify-center shadow-sm transition-all relative';
-                    if (state.isEditingSizes) baseClass += ' edit-mode-active cursor-pointer transform hover:scale-105';
+                    
+                    if (state.isEditingSizes) {
+                        baseClass += ' edit-mode-active cursor-pointer transform hover:scale-105';
+                        if(state.pendingMerge === i) baseClass += ' pending-merge';
+                    }
+                    
                     btn.className = baseClass;
                     btn.dataset.id = i;
                     const color = state.colors[i-1];
@@ -886,11 +970,7 @@
                     `;
                     btn.onpointerdown = (e) => {
                         if (state.isEditingSizes) {
-                            const currentW = state.districtWeights[i];
-                            state.districtWeights[i] = (currentW === 1) ? 2 : 1;
-                            calculateDistrictTargets();
-                            setupPaletteUI(); 
-                            updateGameState(false);
+                            handleMergeInteraction(i);
                         } else {
                             setTool(i);
                         }
@@ -898,6 +978,82 @@
                     els.palette.appendChild(btn);
                 }
                 if(!state.isEditingSizes) setTool(state.currentTool);
+            }
+
+            function handleMergeInteraction(id) {
+                // Scenario 1: Un-merge a 2x district
+                if (state.districtWeights[id] === 2) {
+                    // Split back to 1x
+                    state.districtWeights[id] = 1;
+                    
+                    // Create new district
+                    config.numDistricts++;
+                    state.districtWeights[config.numDistricts] = 1;
+                    // Add new color
+                    const hue = Math.floor((360 / config.numDistricts) * config.numDistricts + 20); 
+                    state.colors.push(`hsl(${hue}, 85%, 85%)`);
+                    
+                    // Reset pending state
+                    state.pendingMerge = null;
+                    
+                    calculateDistrictTargets();
+                    setupPaletteUI();
+                    updateGameState(false);
+                    return;
+                }
+
+                // Scenario 2: Selecting first district for merge
+                if (state.pendingMerge === null) {
+                    state.pendingMerge = id;
+                    // Update UI to show selection
+                    setupPaletteUI();
+                    return;
+                }
+
+                // Scenario 3: Selecting second district to delete
+                if (state.pendingMerge !== null) {
+                    const keepId = state.pendingMerge;
+                    const deleteId = id;
+
+                    if (keepId === deleteId) {
+                        // Cancel
+                        state.pendingMerge = null;
+                        setupPaletteUI();
+                        return;
+                    }
+
+                    // Perform Merge
+                    state.districtWeights[keepId] = 2;
+                    
+                    // Re-assign cells of deleted district to 0
+                    state.grid.forEach(c => {
+                        if (c.districtId === deleteId) c.districtId = 0;
+                        // Shift IDs down for anything higher than deleted
+                        if (c.districtId > deleteId) c.districtId--;
+                    });
+
+                    // Shift Weights down
+                    for(let k=deleteId; k < config.numDistricts; k++) {
+                        state.districtWeights[k] = state.districtWeights[k+1];
+                    }
+                    delete state.districtWeights[config.numDistricts];
+                    
+                    // Shift Colors (remove color of deleted district to keep palette consistent?)
+                    // Actually simpler to just remove the last color, or remove the specific index.
+                    // state.colors corresponds to index i-1.
+                    state.colors.splice(deleteId - 1, 1);
+
+                    config.numDistricts--;
+                    state.pendingMerge = null;
+                    
+                    // Reset tool if we deleted the current tool
+                    state.currentTool = 1;
+
+                    calculateDistrictTargets();
+                    setupPaletteUI();
+                    updateVisuals(); // Update grid colors since IDs changed
+                    updateGameState(false);
+                }
             }
 
             function checkMap() {
@@ -963,17 +1119,20 @@
                     const p1 = distTotal > 0 ? Math.round((counts[1]/distTotal)*100) : 0;
                     const p2 = distTotal > 0 ? Math.round((counts[2]/distTotal)*100) : 0;
                     
-                    const winner = getDistrictWinner(cells);
                     const weight = state.districtWeights[i];
+                    const winners = getDistrictWinners(cells, weight);
                     
-                    let badgeClass = "bg-slate-200 text-slate-500";
-                    let badgeText = "Tie";
-                    if(winner === 0) { badgeClass = "bg-indigo-100 text-indigo-700"; badgeText = "Ind"; }
-                    else if(winner === 1) { badgeClass = "bg-orange-100 text-orange-700"; badgeText = "Org"; }
-                    else if(winner === 2) { badgeClass = "bg-emerald-100 text-emerald-700"; badgeText = "Grn"; }
-                    
-                    if(winner === -1 && distTotal > 0) badgeText = "Tie";
-                    if(distTotal === 0) badgeText = "-";
+                    const getBadge = (w) => {
+                        if(w===0) return `<span class="text-indigo-700 font-bold">Ind</span>`;
+                        if(w===1) return `<span class="text-orange-700 font-bold">Org</span>`;
+                        if(w===2) return `<span class="text-emerald-700 font-bold">Grn</span>`;
+                        return `<span class="text-slate-400">Tie</span>`;
+                    };
+
+                    let winnerBadges = getBadge(winners[0]);
+                    if(weight > 1) {
+                        winnerBadges += ` + ${getBadge(winners[1])}`;
+                    }
 
                     districtRows += `
                         <div class="flex items-center justify-between text-[10px] p-2 rounded bg-white border border-slate-100 shadow-sm mb-1">
@@ -985,8 +1144,8 @@
                                     <span class="text-emerald-600 font-bold" title="Green">${p2}%</span>
                                 </div>
                             </div>
-                            <div class="px-1.5 py-0.5 rounded ${badgeClass} font-bold flex items-center gap-1">
-                                ${badgeText} ${weight>1 ? '<span class="text-[8px] bg-slate-800 text-white px-1 rounded-full">2x</span>':''}
+                            <div class="px-1.5 py-0.5 bg-slate-100 rounded text-[9px] flex items-center gap-1">
+                                ${winnerBadges}
                             </div>
                         </div>
                     `;
