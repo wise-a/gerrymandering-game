@@ -1,0 +1,933 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Gerrymander Puzzle</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap');
+
+        :root {
+            --color-party-0: #6366f1; /* Indigo */
+            --color-party-1: #f97316; /* Orange */
+            --color-party-2: #10b981; /* Emerald/Green */
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f8fafc;
+            color: #1e293b;
+            overscroll-behavior: none;
+        }
+
+        .no-select {
+            user-select: none;
+            -webkit-user-select: none;
+            -webkit-touch-callout: none;
+        }
+
+        /* --- Grid & Cell Styles --- */
+        .game-grid {
+            display: grid;
+            gap: 2px;
+            background-color: #94a3b8;
+            border: 2px solid #94a3b8;
+            border-radius: 8px;
+            overflow: hidden;
+            touch-action: none; 
+            width: 95%;
+            aspect-ratio: 1;
+            margin: 10px auto;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+            position: relative;
+        }
+
+        .cell {
+            background-color: white;
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background-color 0.2s ease;
+            flex-wrap: wrap;
+            padding: 2px;
+            gap: 2px;
+        }
+
+        /* Population Dots */
+        .voter {
+            width: 36%;  /* Fixed uniform size */
+            height: 36%; /* Fixed uniform size */
+            border-radius: 50%;
+            pointer-events: none;
+            z-index: 5;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.2);
+            transition: transform 0.2s;
+        }
+        
+        /* Party Colors */
+        .bg-party-0 { background-color: var(--color-party-0); }
+        .bg-party-1 { background-color: var(--color-party-1); }
+        .bg-party-2 { background-color: var(--color-party-2); }
+        
+        .text-party-0 { color: var(--color-party-0); }
+        .text-party-1 { color: var(--color-party-1); }
+        .text-party-2 { color: var(--color-party-2); }
+
+        .border-party-0 { border-color: var(--color-party-0); }
+        .border-party-1 { border-color: var(--color-party-1); }
+        .border-party-2 { border-color: var(--color-party-2); }
+        
+        /* --- Palette --- */
+        .palette-btn {
+            transition: transform 0.1s, border-color 0.1s;
+            border: 3px solid transparent;
+            position: relative;
+            touch-action: manipulation;
+            font-weight: 800;
+            color: #475569;
+            text-shadow: 0 1px 0 rgba(255,255,255,0.5);
+        }
+        .palette-btn:active { transform: scale(0.95); }
+        .palette-btn.active {
+            transform: scale(1.15);
+            border-color: #334155;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.15);
+            z-index: 10;
+        }
+        
+        /* Modal Animation */
+        .modal-overlay {
+            background-color: rgba(0,0,0,0.6);
+            backdrop-filter: blur(3px);
+            animation: fadeIn 0.2s ease-out;
+        }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+        /* Range Slider Styling */
+        input[type=range] {
+            -webkit-appearance: none;
+            width: 100%;
+            background: transparent;
+        }
+        input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            height: 20px;
+            width: 20px;
+            border-radius: 50%;
+            background: #4f46e5;
+            cursor: pointer;
+            margin-top: -8px; 
+            box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+        }
+        input[type=range]::-webkit-slider-runnable-track {
+            width: 100%;
+            height: 4px;
+            cursor: pointer;
+            background: #cbd5e1;
+            border-radius: 2px;
+        }
+
+        .advantage-badge {
+            font-size: 10px;
+            padding: 2px 6px;
+            border-radius: 99px;
+            background: #f1f5f9;
+            color: #64748b;
+            font-weight: bold;
+            margin-top: 2px;
+            display: inline-block;
+        }
+        .advantage-active .advantage-badge {
+            background: #fef3c7;
+            color: #d97706;
+            border: 1px solid #fcd34d;
+        }
+
+        /* Border Visibility Fixes */
+        .cell[data-border-top="true"] { border-top: 3px solid #334155; margin-top: -3px; z-index: 20; }
+        .cell[data-border-bottom="true"] { border-bottom: 3px solid #334155; margin-bottom: -3px; z-index: 20; }
+        .cell[data-border-left="true"] { border-left: 3px solid #334155; margin-left: -3px; z-index: 20; }
+        .cell[data-border-right="true"] { border-right: 3px solid #334155; margin-right: -3px; z-index: 20; }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col no-select">
+
+    <!-- Header -->
+    <header class="bg-white border-b border-slate-200 px-4 py-2 flex justify-between items-center sticky top-0 z-40 shadow-sm h-14">
+        <h1 class="text-lg font-bold tracking-tight text-slate-800">Redistrict<span class="text-indigo-600">Puzzle</span></h1>
+        <div class="flex gap-2">
+             <button onclick="app.openSettings()" class="bg-slate-100 text-slate-600 hover:text-slate-800 hover:bg-slate-200 p-2 rounded-lg transition" title="New Game Settings">
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.1a2 2 0 0 1-1-1.72v-.51a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+            </button>
+            <button onclick="app.toggleRules()" class="bg-slate-100 text-slate-600 hover:text-slate-800 hover:bg-slate-200 p-2 rounded-lg transition" title="Help">
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+            </button>
+        </div>
+    </header>
+
+    <main class="flex-grow w-full flex flex-col items-center justify-start p-2 gap-2 max-w-lg mx-auto">
+        
+        <!-- Game Controls / Scoreboard -->
+        <div class="w-full bg-white p-3 rounded-xl shadow-sm border border-slate-200 space-y-3">
+            
+            <!-- Header for Stats -->
+            <div class="flex justify-center items-center bg-slate-50 p-2 rounded-lg">
+                <span class="text-xs font-bold text-slate-500 uppercase tracking-wider">Results Analysis Mode</span>
+            </div>
+
+            <!-- Scoreboard -->
+            <div class="grid grid-cols-3 gap-2 text-center">
+                <!-- Party 0 -->
+                <div class="flex flex-col items-center p-2 rounded bg-indigo-50/50 border border-indigo-100" id="sb-panel-0">
+                    <span class="text-2xl font-bold text-party-0 leading-none" id="score-0">0</span>
+                    <span class="text-[9px] font-bold text-slate-400 uppercase mt-1">Districts</span>
+                    <span class="text-[9px] text-slate-400" id="total-pop-0">Pop: 0</span>
+                    <div id="badge-0" class="hidden advantage-badge">Tie-Breaker</div>
+                </div>
+                <!-- Party 1 -->
+                <div class="flex flex-col items-center p-2 rounded bg-orange-50/50 border border-orange-100" id="sb-panel-1">
+                    <span class="text-2xl font-bold text-party-1 leading-none" id="score-1">0</span>
+                    <span class="text-[9px] font-bold text-slate-400 uppercase mt-1">Districts</span>
+                    <span class="text-[9px] text-slate-400" id="total-pop-1">Pop: 0</span>
+                    <div id="badge-1" class="hidden advantage-badge">Tie-Breaker</div>
+                </div>
+                <!-- Party 2 -->
+                <div class="flex flex-col items-center p-2 rounded bg-emerald-50/50 border border-emerald-100" id="sb-panel-2">
+                    <span class="text-2xl font-bold text-party-2 leading-none" id="score-2">0</span>
+                    <span class="text-[9px] font-bold text-slate-400 uppercase mt-1">Districts</span>
+                    <span class="text-[9px] text-slate-400" id="total-pop-2">Pop: 0</span>
+                    <div id="badge-2" class="hidden advantage-badge">Tie-Breaker</div>
+                </div>
+            </div>
+            
+            <!-- Status Text -->
+            <div class="flex justify-between items-center gap-2">
+                <button onclick="app.resetMap()" class="text-[10px] text-slate-500 font-bold hover:bg-slate-100 px-2 py-1 rounded transition">Reset Map</button>
+                <div id="validation-msg" class="flex-1 text-center text-[10px] font-bold py-1 px-1 rounded bg-slate-100 text-slate-500 leading-tight truncate">
+                    Loading...
+                </div>
+            </div>
+        </div>
+
+        <!-- The Grid -->
+        <div id="game-grid" class="game-grid">
+            <!-- Cells generated by JS -->
+        </div>
+
+        <!-- Controls Area -->
+        <div class="w-full px-2">
+            <!-- Palette -->
+            <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-3 w-full overflow-hidden">
+                <div class="flex justify-center flex-wrap gap-2 mb-3" id="palette">
+                    <!-- Generated by JS -->
+                </div>
+                <!-- Check Button -->
+                <button onclick="app.checkMap()" class="w-full bg-slate-800 text-white font-bold py-3 rounded-xl shadow-md active:bg-slate-900 transition flex items-center justify-center gap-2">
+                    <span>Check Results</span>
+                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
+                </button>
+            </div>
+        </div>
+    </main>
+
+    <!-- Modal: Settings -->
+    <div id="settings-modal" class="hidden fixed inset-0 z-[100] modal-overlay flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl shadow-2xl max-w-sm w-full p-6 animate-bounce-in">
+            <h2 class="text-xl font-bold text-slate-800 mb-4 flex items-center gap-2">
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-indigo-600"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.1a2 2 0 0 1-1-1.72v-.51a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                New Game Setup
+            </h2>
+            
+            <div class="space-y-6 mb-6">
+                <!-- Grid Size Input -->
+                <div>
+                    <div class="flex justify-between mb-2">
+                        <label class="text-sm font-bold text-slate-700">Grid Size</label>
+                        <span id="setting-size-val" class="text-sm font-mono bg-slate-100 px-2 rounded text-slate-600">5 x 5</span>
+                    </div>
+                    <input type="range" min="4" max="10" value="5" id="setting-size" oninput="app.updateSettingsUI()">
+                </div>
+
+                <!-- District Count Input -->
+                <div>
+                    <label class="block text-sm font-bold text-slate-700 mb-2">Number of Districts</label>
+                    <div class="grid grid-cols-3 gap-2" id="setting-districts-container">
+                        <!-- Filled by JS -->
+                    </div>
+                    <p class="text-xs text-slate-400 mt-2" id="setting-district-info">Target: 5 voters</p>
+                </div>
+            </div>
+
+            <div class="flex gap-3">
+                <button onclick="document.getElementById('settings-modal').classList.add('hidden')" class="flex-1 bg-slate-100 text-slate-700 font-bold py-3 rounded-xl hover:bg-slate-200 transition">Cancel</button>
+                <button onclick="app.generateNewGame()" class="flex-1 bg-indigo-600 text-white font-bold py-3 rounded-xl hover:bg-indigo-700 transition shadow-lg">Generate</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: Info/Win -->
+    <div id="info-modal" class="hidden fixed inset-0 z-[100] modal-overlay flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl shadow-2xl max-w-sm w-full p-6 text-center animate-bounce-in">
+            <div id="modal-icon" class="text-4xl mb-3">🗳️</div>
+            <h2 id="modal-title" class="text-xl font-bold text-slate-800 mb-2">Title</h2>
+            <div id="modal-body" class="text-sm text-slate-600 mb-6 space-y-3 text-left bg-slate-50 p-3 rounded-lg border border-slate-100">
+                <!-- Content -->
+            </div>
+            <button onclick="document.getElementById('info-modal').classList.add('hidden')" class="w-full bg-slate-800 text-white font-bold py-3 px-4 rounded-xl hover:bg-slate-900 transition shadow-md">
+                Okay
+            </button>
+        </div>
+    </div>
+
+    <script>
+        const app = function() {
+            // Configuration & State
+            let config = {
+                gridSize: 5,
+                numDistricts: 5,
+                targetDistrictPop: 5,
+                totalCells: 25,
+                totalPopulation: 25,
+                numParties: 3
+            };
+            
+            let state = {
+                grid: [], // { id, voters: [0, 1, 2], districtId }
+                currentTool: 1,
+                isDragging: false,
+                isLevelComplete: false,
+                gridRect: null,
+                colors: [],
+                viewMode: 'edit',
+                partyTotals: {0:0, 1:0, 2:0},
+                minorityParty: -1 
+            };
+
+            // Define els container but don't populate yet
+            let els = {};
+
+            function init() {
+                // Populate DOM elements here to ensure DOM is ready
+                els = {
+                    grid: document.getElementById('game-grid'),
+                    score0: document.getElementById('score-0'),
+                    score1: document.getElementById('score-1'),
+                    score2: document.getElementById('score-2'),
+                    totalPop0: document.getElementById('total-pop-0'),
+                    totalPop1: document.getElementById('total-pop-1'),
+                    totalPop2: document.getElementById('total-pop-2'),
+                    validationMsg: document.getElementById('validation-msg'),
+                    palette: document.getElementById('palette'),
+                    settingsModal: document.getElementById('settings-modal'),
+                    infoModal: document.getElementById('info-modal'),
+                    modalTitle: document.getElementById('modal-title'),
+                    modalBody: document.getElementById('modal-body'),
+                    modalIcon: document.getElementById('modal-icon'),
+                    settingSize: document.getElementById('setting-size'),
+                    settingSizeVal: document.getElementById('setting-size-val'),
+                    settingDistrictContainer: document.getElementById('setting-districts-container'),
+                    settingDistrictInfo: document.getElementById('setting-district-info')
+                };
+
+                // Initialize with default 5x5
+                generateNewGame(); 
+                
+                // Responsive grid math
+                window.addEventListener('resize', () => {
+                    state.gridRect = els.grid.getBoundingClientRect();
+                });
+                
+                // Show Welcome
+                setTimeout(() => {
+                    showModal('Sandbox Mode', `
+                        <p class="mb-2"><strong>Explore Gerrymandering:</strong> Draw districts to see how boundaries affect election results.</p>
+                        <p class="mb-2"><strong>Minority Rule:</strong> The party with the fewest voters wins ties.</p>
+                        <p class="text-xs text-slate-500 mt-2">Check results to compare Popular Vote vs Seats Won.</p>
+                    `, '🗺️');
+                }, 300);
+            }
+
+            // --- Generation Logic ---
+            function updateSettingsUI() {
+                const size = parseInt(els.settingSize.value);
+                els.settingSizeVal.innerText = `${size} x ${size}`;
+                const totalPop = size * size; 
+                
+                let validCounts = [];
+                for (let i = 2; i <= totalPop / 2; i++) {
+                    if (totalPop % i === 0) {
+                        let dSize = totalPop / i;
+                        if (dSize >= 3 && i >= 2) validCounts.push(i);
+                    }
+                }
+                
+                els.settingDistrictContainer.innerHTML = '';
+                
+                validCounts.forEach((count, idx) => {
+                    const btn = document.createElement('button');
+                    const dPop = totalPop / count;
+                    btn.className = `p-2 rounded border text-sm font-bold transition ${
+                        (idx === Math.floor(validCounts.length/2)) ? 'bg-indigo-100 border-indigo-300 text-indigo-700 ring-2 ring-indigo-200' : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
+                    }`;
+                    btn.onclick = (e) => {
+                        document.querySelectorAll('#setting-districts-container button').forEach(b => {
+                            b.className = 'p-2 rounded border border-slate-200 bg-slate-50 text-slate-600 text-sm font-bold hover:bg-slate-100 transition';
+                        });
+                        e.target.className = 'p-2 rounded border border-indigo-300 bg-indigo-100 text-indigo-700 text-sm font-bold ring-2 ring-indigo-200 transition';
+                        els.settingDistrictInfo.innerText = `Target: ${dPop} voters per district`;
+                        config.nextNumDistricts = count;
+                    };
+                    btn.innerText = count;
+                    els.settingDistrictContainer.appendChild(btn);
+                    
+                    if (idx === Math.floor(validCounts.length/2)) {
+                        config.nextNumDistricts = count;
+                        els.settingDistrictInfo.innerText = `Target: ${dPop} voters per district`;
+                    }
+                });
+            }
+
+            function openSettings() {
+                updateSettingsUI();
+                els.settingsModal.classList.remove('hidden');
+            }
+
+            function generateNewGame() {
+                if (els.settingSize.value) {
+                    config.gridSize = parseInt(els.settingSize.value);
+                    if (config.nextNumDistricts) config.numDistricts = config.nextNumDistricts;
+                    else {
+                        const total = config.gridSize * config.gridSize;
+                        if (total % config.gridSize === 0) config.numDistricts = config.gridSize;
+                        else config.numDistricts = 5; 
+                    }
+                }
+                
+                config.totalCells = config.gridSize * config.gridSize;
+                config.totalPopulation = config.totalCells; 
+                config.targetDistrictPop = config.totalPopulation / config.numDistricts;
+                
+                els.settingsModal.classList.add('hidden');
+
+                // Generate Palette Colors
+                state.colors = [];
+                for (let i = 0; i < config.numDistricts; i++) {
+                    const hue = Math.floor((360 / config.numDistricts) * i + 20); 
+                    state.colors.push(`hsl(${hue}, 85%, 85%)`);
+                }
+
+                // --- 1. Generate Population Density (Cities/Rural) ---
+                let populations = new Array(config.totalCells).fill(1);
+                
+                // Create density clusters
+                const mutations = Math.floor(config.totalCells * 0.7); 
+                for(let k=0; k<mutations; k++) {
+                    const src = Math.floor(Math.random() * config.totalCells);
+                    
+                    // Pick a random neighbor
+                    const row = Math.floor(src / config.gridSize);
+                    const col = src % config.gridSize;
+                    const neighbors = [];
+                    if(row > 0) neighbors.push(src - config.gridSize);
+                    if(row < config.gridSize-1) neighbors.push(src + config.gridSize);
+                    if(col > 0) neighbors.push(src - 1);
+                    if(col < config.gridSize-1) neighbors.push(src + 1);
+                    
+                    const dest = neighbors[Math.floor(Math.random() * neighbors.length)];
+                    if (populations[src] > 0 && populations[dest] < 2) {
+                        populations[src]--;
+                        populations[dest]++;
+                    }
+                }
+
+                // 2. Generate Political Voters (3 Parties)
+                const p1 = Math.floor(Math.random() * (config.totalPopulation * 0.4)) + Math.floor(config.totalPopulation * 0.2);
+                const remaining = config.totalPopulation - p1;
+                const p2 = Math.floor(Math.random() * (remaining * 0.6)) + Math.floor(remaining * 0.2);
+                const p3 = config.totalPopulation - p1 - p2;
+
+                let voterPool = [];
+                for(let i=0; i<p1; i++) voterPool.push(0);
+                for(let i=0; i<p2; i++) voterPool.push(1);
+                for(let i=0; i<p3; i++) voterPool.push(2);
+                
+                for (let i = voterPool.length - 1; i > 0; i--) {
+                    const j = Math.floor(Math.random() * (i + 1));
+                    [voterPool[i], voterPool[j]] = [voterPool[j], voterPool[i]];
+                }
+
+                // Calculate Totals and Minority
+                state.partyTotals = {0: p1, 1: p2, 2: p3};
+                const minVal = Math.min(p1, p2, p3);
+                if (p1 === minVal) state.minorityParty = 0;
+                else if (p2 === minVal) state.minorityParty = 1;
+                else state.minorityParty = 2;
+
+                // Update UI Stats
+                els.totalPop0.innerText = `Pop: ${p1}`;
+                els.totalPop1.innerText = `Pop: ${p2}`;
+                els.totalPop2.innerText = `Pop: ${p3}`;
+                
+                // Show Minority Badge
+                [0,1,2].forEach(i => {
+                    const badge = document.getElementById(`badge-${i}`);
+                    const panel = document.getElementById(`sb-panel-${i}`);
+                    if (i === state.minorityParty) {
+                        badge.classList.remove('hidden');
+                        panel.classList.add('advantage-active');
+                    } else {
+                        badge.classList.add('hidden');
+                        panel.classList.remove('advantage-active');
+                    }
+                });
+
+                // Distribute voters
+                let poolIndex = 0;
+                state.grid = populations.map((pop, i) => {
+                    let cellVoters = [];
+                    for(let k=0; k<pop; k++) {
+                        if(poolIndex < voterPool.length) {
+                            cellVoters.push(voterPool[poolIndex]);
+                            poolIndex++;
+                        }
+                    }
+                    return {
+                        id: i,
+                        voters: cellVoters,
+                        districtId: 0
+                    };
+                });
+
+                state.currentTool = 1;
+                state.isLevelComplete = false;
+                state.viewMode = 'edit';
+
+                setupDOM();
+                updateGameState(false); 
+            }
+
+            function setupDOM() {
+                els.grid.style.gridTemplateColumns = `repeat(${config.gridSize}, 1fr)`;
+                els.grid.innerHTML = '';
+
+                state.grid.forEach((cellData, i) => {
+                    const cell = document.createElement('div');
+                    const pop = cellData.voters.length;
+                    cell.className = `cell pop-${pop}`;
+                    cell.style.backgroundColor = '#ffffff'; 
+                    
+                    cellData.voters.forEach(party => {
+                        const voter = document.createElement('div');
+                        let colorClass = 'bg-slate-300';
+                        if(party === 0) colorClass = 'bg-party-0';
+                        if(party === 1) colorClass = 'bg-party-1';
+                        if(party === 2) colorClass = 'bg-party-2';
+                        voter.className = `voter ${colorClass}`;
+                        cell.appendChild(voter);
+                    });
+                    
+                    els.grid.appendChild(cell);
+                });
+
+                els.palette.innerHTML = '';
+                for (let i = 1; i <= config.numDistricts; i++) {
+                    const btn = document.createElement('button');
+                    btn.className = 'palette-btn w-12 h-12 sm:w-14 sm:h-14 rounded-full flex flex-col items-center justify-center shadow-sm transition-all';
+                    btn.dataset.id = i;
+                    const color = state.colors[i-1];
+                    btn.style.backgroundColor = color;
+                    btn.innerHTML = `
+                        <span class="text-sm sm:text-base leading-none">${i}</span>
+                        <span id="dist-count-${i}" class="text-[9px] sm:text-[10px] leading-none font-bold opacity-70">0/${config.targetDistrictPop}</span>
+                    `;
+                    btn.onpointerdown = (e) => {
+                        app.setTool(i);
+                    };
+                    els.palette.appendChild(btn);
+                }
+                
+                setTool(1);
+                attachEvents();
+                setTimeout(() => { state.gridRect = els.grid.getBoundingClientRect(); }, 50);
+            }
+
+            function attachEvents() {
+                els.grid.onmousedown = (e) => { 
+                    resetViewMode(); 
+                    state.isDragging = true; 
+                    handleInput(e.clientX, e.clientY); 
+                };
+                window.onmouseup = () => { state.isDragging = false; };
+                window.onmousemove = (e) => { if (state.isDragging) handleInput(e.clientX, e.clientY); };
+
+                els.grid.ontouchstart = (e) => {
+                    resetViewMode();
+                    state.isDragging = true;
+                    state.gridRect = els.grid.getBoundingClientRect();
+                    if(e.cancelable) e.preventDefault();
+                    handleInput(e.touches[0].clientX, e.touches[0].clientY);
+                };
+                els.grid.ontouchmove = (e) => {
+                    if (!state.isDragging) return;
+                    if(e.cancelable) e.preventDefault();
+                    handleInput(e.touches[0].clientX, e.touches[0].clientY);
+                };
+                window.ontouchend = () => { state.isDragging = false; };
+            }
+
+            function resetViewMode() {
+                if (state.viewMode === 'results') {
+                    state.viewMode = 'edit';
+                    updateVisuals();
+                }
+            }
+
+            function handleInput(clientX, clientY) {
+                // Update rect every time to handle scroll offsets dynamically
+                if(els.grid) {
+                    state.gridRect = els.grid.getBoundingClientRect();
+                }
+                
+                if (!state.gridRect) return;
+                const x = clientX - state.gridRect.left;
+                const y = clientY - state.gridRect.top;
+                
+                if (x < 0 || x > state.gridRect.width || y < 0 || y > state.gridRect.height) return;
+
+                const col = Math.floor((x / state.gridRect.width) * config.gridSize);
+                const row = Math.floor((y / state.gridRect.height) * config.gridSize);
+                const index = row * config.gridSize + col;
+
+                if (index >= 0 && index < config.totalCells) {
+                    paintCell(index);
+                }
+            }
+
+            function setTool(id) {
+                state.currentTool = id;
+                resetViewMode();
+                const btns = els.palette.children;
+                for (let i=0; i<btns.length; i++) {
+                    const btn = btns[i];
+                    if (parseInt(btn.dataset.id) === id) {
+                        btn.classList.add('active');
+                        btn.style.borderColor = '#334155';
+                    } else {
+                        btn.classList.remove('active');
+                        btn.style.borderColor = 'transparent';
+                    }
+                }
+                if (navigator.vibrate) navigator.vibrate(5);
+            }
+
+            function paintCell(index) {
+                if (state.grid[index].districtId === state.currentTool) return;
+                state.grid[index].districtId = state.currentTool;
+                updateVisuals();
+                updateGameState(false); 
+                if (navigator.vibrate) navigator.vibrate(5);
+            }
+            
+            function resetMap() {
+                 state.grid.forEach(c => c.districtId = 0);
+                 resetViewMode();
+                 updateVisuals();
+                 updateGameState(false);
+            }
+
+            // CORE LOGIC: Determines who wins a set of cells
+            function getDistrictWinner(cells) {
+                let counts = {0:0, 1:0, 2:0};
+                cells.forEach(c => {
+                    c.voters.forEach(v => { counts[v]++; });
+                });
+                
+                const max = Math.max(counts[0], counts[1], counts[2]);
+                if (max === 0) return -1; // No voters
+
+                let winners = [];
+                if (counts[0] === max) winners.push(0);
+                if (counts[1] === max) winners.push(1);
+                if (counts[2] === max) winners.push(2);
+                
+                if (winners.length === 1) {
+                    return winners[0];
+                } else {
+                    // TIE LOGIC: If Minority Party is involved in the tie, they win
+                    if (winners.includes(state.minorityParty)) {
+                        return state.minorityParty;
+                    }
+                    return -1; // True tie (no winner)
+                }
+            }
+
+            function updateVisuals() {
+                const domCells = els.grid.children;
+                
+                // Pre-calculate district winners if in results mode
+                let districtWinners = {};
+                if (state.viewMode === 'results') {
+                    for(let i=1; i<=config.numDistricts; i++) {
+                        const cells = state.grid.filter(c => c.districtId === i);
+                        districtWinners[i] = getDistrictWinner(cells);
+                    }
+                }
+
+                state.grid.forEach((c, i) => {
+                    const el = domCells[i];
+                    const dId = c.districtId;
+
+                    if (dId === 0) {
+                        el.style.backgroundColor = '#ffffff';
+                    } else {
+                        if (state.viewMode === 'results') {
+                            const w = districtWinners[dId];
+                            if (w === 0) el.style.backgroundColor = '#e0e7ff'; 
+                            else if (w === 1) el.style.backgroundColor = '#ffedd5'; 
+                            else if (w === 2) el.style.backgroundColor = '#d1fae5'; 
+                            else el.style.backgroundColor = '#f1f5f9'; // tie
+                        } else {
+                            el.style.backgroundColor = state.colors[dId - 1];
+                        }
+                    }
+                    
+                    if (dId === 0) {
+                        el.removeAttribute('data-border-top');
+                        el.removeAttribute('data-border-bottom');
+                        el.removeAttribute('data-border-left');
+                        el.removeAttribute('data-border-right');
+                    } else {
+                        const row = Math.floor(i / config.gridSize);
+                        const col = i % config.gridSize;
+                        
+                        const nTop = row > 0 ? state.grid[i - config.gridSize] : null;
+                        const nBottom = row < config.gridSize - 1 ? state.grid[i + config.gridSize] : null;
+                        const nLeft = col > 0 ? state.grid[i - 1] : null;
+                        const nRight = col < config.gridSize - 1 ? state.grid[i + 1] : null;
+                        
+                        el.dataset.borderTop = (nTop && nTop.districtId !== dId) ? "true" : "false";
+                        el.dataset.borderBottom = (nBottom && nBottom.districtId !== dId) ? "true" : "false";
+                        el.dataset.borderLeft = (nLeft && nLeft.districtId !== dId) ? "true" : "false";
+                        el.dataset.borderRight = (nRight && nRight.districtId !== dId) ? "true" : "false";
+                    }
+                });
+            }
+
+            function getDistrictSquares() {
+                // Helper to draw mini squares for districts
+                let html = '';
+                for(let i=1; i<=config.numDistricts; i++) {
+                    const cells = state.grid.filter(c => c.districtId === i);
+                    const winner = getDistrictWinner(cells);
+                    let bg = "bg-slate-200";
+                    if(winner===0) bg="bg-indigo-500";
+                    if(winner===1) bg="bg-orange-500";
+                    if(winner===2) bg="bg-emerald-500";
+                    html += `<div class="${bg} h-6 rounded flex items-center justify-center text-white text-[10px] font-bold">${i}</div>`;
+                }
+                return html;
+            }
+
+            function checkMap() {
+                const status = updateGameState(false); 
+                
+                if (status.unassigned > 0) {
+                    showModal('Map Issue', `<p class="text-red-600 font-bold">Incomplete Map</p><p>You must assign all ${config.totalCells} blocks to a district.</p>`, '⚠️');
+                    return;
+                }
+                if (status.invalidSize) {
+                    showModal('Map Issue', `<p class="text-red-600 font-bold">Uneven Population</p><p>Every district must have exactly ${config.targetDistrictPop} voters.</p>`, '⚖️');
+                    return;
+                }
+                if (status.broken) {
+                    showModal('Map Issue', `<p class="text-red-600 font-bold">Broken Districts</p><p>Districts must be connected.</p>`, '🧩');
+                    return;
+                }
+
+                state.viewMode = 'results';
+                updateVisuals();
+                
+                // --- PERCENTAGE CALCULATIONS ---
+                const totalSeats = config.numDistricts;
+                const totalVotes = state.partyTotals[0] + state.partyTotals[1] + state.partyTotals[2];
+                const getPct = (val, total) => total > 0 ? Math.round((val/total)*100) : 0;
+
+                const parties = [
+                    { name: "Indigo", id: 0, color: "text-indigo-600", bg: "bg-indigo-50", wins: status.wins0 },
+                    { name: "Orange", id: 1, color: "text-orange-600", bg: "bg-orange-50", wins: status.wins1 },
+                    { name: "Green",  id: 2, color: "text-emerald-600", bg: "bg-emerald-50", wins: status.wins2 }
+                ];
+
+                let comparisonRows = '';
+                parties.forEach(p => {
+                    const votes = state.partyTotals[p.id];
+                    const votePct = getPct(votes, totalVotes);
+                    const seatPct = getPct(p.wins, totalSeats);
+                    // Disproportionate Representation Calculation
+                    const diff = seatPct - votePct;
+                    let note = "";
+                    if (diff > 0) note = `<span class="text-[10px] text-green-600 font-bold ml-1">(+${diff}%)</span>`;
+                    else if (diff < 0) note = `<span class="text-[10px] text-red-500 ml-1">(${diff}%)</span>`;
+
+                    comparisonRows += `
+                        <div class="grid grid-cols-3 gap-2 text-xs items-center p-2 rounded mb-1 border-b border-slate-100 last:border-0 hover:bg-slate-50">
+                            <div class="font-bold ${p.color}">${p.name}</div>
+                            <div class="text-center text-slate-600">${votePct}%</div>
+                            <div class="text-right font-bold text-slate-800 flex justify-end items-center">
+                                ${seatPct}% ${note}
+                            </div>
+                        </div>
+                    `;
+                });
+
+                showModal('Election Analysis', `
+                    <div class="mb-4">
+                        <p class="text-sm text-slate-500 mb-2">Comparison: Popular Vote vs Seats Won</p>
+                        
+                        <div class="bg-white rounded-lg border border-slate-200 overflow-hidden">
+                            <div class="grid grid-cols-3 gap-2 bg-slate-100 p-2 text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+                                <div>Party</div>
+                                <div class="text-center">Pop. Vote</div>
+                                <div class="text-right">Seats</div>
+                            </div>
+                            <div class="p-1">
+                                ${comparisonRows}
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="bg-slate-50 p-2 rounded-lg max-h-32 overflow-y-auto border border-slate-200 mb-3">
+                        <p class="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1 sticky top-0 bg-slate-50">District Winners</p>
+                        <div class="grid grid-cols-5 gap-1">
+                            ${getDistrictSquares()}
+                        </div>
+                    </div>
+
+                    <div class="text-xs text-slate-500 text-center">
+                        Tap grid to continue editing.
+                    </div>
+                `, '📊');
+            }
+
+            function updateGameState(triggerWin = false) {
+                const districts = {};
+                for(let i=1; i<=config.numDistricts; i++) districts[i] = [];
+                
+                let unassigned = 0;
+                state.grid.forEach(c => {
+                    if (c.districtId !== 0) districts[c.districtId].push(c);
+                    else unassigned++;
+                });
+
+                let wins0 = 0, wins1 = 0, wins2 = 0;
+                let invalidSize = false;
+                let broken = false;
+
+                for (let i = 1; i <= config.numDistricts; i++) {
+                    const cells = districts[i];
+                    
+                    // Calc Population
+                    const distPop = cells.reduce((sum, c) => sum + c.voters.length, 0);
+
+                    // Update UI Counter
+                    const counterEl = document.getElementById(`dist-count-${i}`);
+                    if (counterEl) {
+                        counterEl.innerText = `${distPop}/${config.targetDistrictPop}`;
+                        if (distPop === config.targetDistrictPop) {
+                             counterEl.className = "text-[9px] sm:text-[10px] leading-none font-bold text-slate-800";
+                        } else if (distPop > config.targetDistrictPop) {
+                             counterEl.className = "text-[9px] sm:text-[10px] leading-none font-bold text-red-700";
+                        } else {
+                             counterEl.className = "text-[9px] sm:text-[10px] leading-none font-bold opacity-60";
+                        }
+                    }
+                    
+                    if (distPop !== config.targetDistrictPop) invalidSize = true;
+                    if (cells.length > 0 && !checkContiguity(cells)) broken = true;
+
+                    // Calculate Winner using consolidated logic
+                    const winner = getDistrictWinner(cells);
+                    if(winner === 0) wins0++;
+                    if(winner === 1) wins1++;
+                    if(winner === 2) wins2++;
+                }
+
+                els.score0.innerText = wins0;
+                els.score1.innerText = wins1;
+                els.score2.innerText = wins2;
+                
+                if (unassigned > 0) {
+                    els.validationMsg.innerText = `Assign blocks: ${config.totalCells - unassigned}/${config.totalCells}`;
+                    els.validationMsg.className = "flex-1 text-center text-[10px] font-bold py-1 px-1 rounded bg-slate-50 text-slate-400";
+                } else if (invalidSize) {
+                    els.validationMsg.innerText = `Need ${config.targetDistrictPop} voters/district`;
+                    els.validationMsg.className = "flex-1 text-center text-[10px] font-bold py-1 px-1 rounded bg-red-100 text-red-600";
+                } else if (broken) {
+                    els.validationMsg.innerText = "Districts must be connected";
+                    els.validationMsg.className = "flex-1 text-center text-[10px] font-bold py-1 px-1 rounded bg-red-100 text-red-600";
+                } else {
+                    els.validationMsg.innerText = "Valid Map - Check Results";
+                    els.validationMsg.className = "flex-1 text-center text-[10px] font-bold py-1 px-1 rounded bg-green-100 text-green-700";
+                }
+
+                return { wins0, wins1, wins2, invalidSize, broken, unassigned };
+            }
+
+            function checkContiguity(cells) {
+                if (cells.length === 0) return true;
+                const indices = new Set(cells.map(c => c.id));
+                const start = cells[0].id;
+                const queue = [start];
+                const visited = new Set([start]);
+                
+                while(queue.length > 0) {
+                    const curr = queue.shift();
+                    const row = Math.floor(curr / config.gridSize);
+                    const col = curr % config.gridSize;
+                    
+                    const neighbors = [
+                        row > 0 ? curr - config.gridSize : -1,
+                        row < config.gridSize - 1 ? curr + config.gridSize : -1,
+                        col > 0 ? curr - 1 : -1,
+                        col < config.gridSize - 1 ? curr + 1 : -1
+                    ];
+                    
+                    neighbors.forEach(n => {
+                        if (n !== -1 && indices.has(n) && !visited.has(n)) {
+                            visited.add(n);
+                            queue.push(n);
+                        }
+                    });
+                }
+                return visited.size === indices.size;
+            }
+
+            function showModal(title, html, icon) {
+                els.modalTitle.innerText = title;
+                els.modalBody.innerHTML = html;
+                els.modalIcon.innerText = icon;
+                els.infoModal.classList.remove('hidden');
+            }
+            
+            function toggleRules() {
+                init();
+            }
+
+            return {
+                init, 
+                setTool, 
+                openSettings, 
+                updateSettingsUI, 
+                generateNewGame,
+                resetMap,
+                toggleRules,
+                checkMap
+            };
+        }();
+
+        window.onload = app.init;
+    </script>
+</body>
+</html>
