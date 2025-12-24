@@ -339,7 +339,8 @@
                 isEditingSizes: false,
                 pendingMerge: null, // New State for Merging
                 districtWeights: {}, 
-                districtTargets: {} 
+                districtTargets: {},
+                ignoreContiguity: false
             };
 
             let els = {};
@@ -407,6 +408,7 @@
             }
 
             function checkContiguity(cells) {
+                if (state.ignoreContiguity) return true;
                 if (cells.length === 0) return true;
                 const indices = new Set(cells.map(c => c.id));
                 const start = cells[0].id;
@@ -741,6 +743,14 @@
                     settingDistrictContainer: document.getElementById('setting-districts-container'),
                     settingDistrictInfo: document.getElementById('setting-district-info')
                 };
+
+                // Secret Kill Switch
+                window.addEventListener('keydown', (e) => {
+                    if (e.key.toLowerCase() === 'x') {
+                        state.ignoreContiguity = !state.ignoreContiguity;
+                        updateGameState(false); 
+                    }
+                });
 
                 generateNewGame(); 
                 
